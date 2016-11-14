@@ -25,6 +25,7 @@ is built, it will copy the libraries to your program's folder and then patch
 everything that it is aware of (using `install_name_tool`). It should be able
 to handle different symbolic links and all that correctly
 
+# Credits
 Inspired by [macdylibbundler](https://github.com/auriamg/macdylibbundler), it does
 the same basic thing except with less options (at the moment) and it builds a full
 dependency tree
