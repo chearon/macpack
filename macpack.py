@@ -215,8 +215,8 @@ def get_dest_and_loader_path(root_dep_path, dest_path):
     loader_path = dest_path
   else:
     dest_path = root_dep_path.parent / dest_path
-    rel_to_binary = os.path.relpath(str(dest_path), str(root_dep_path))
-    loader_path = pathlib.PurePath('@executable_path', rel_to_binary)
+    rel_to_binary = os.path.relpath(str(dest_path), str(root_dep_path.parent))
+    loader_path = pathlib.PurePath('@loader_path', rel_to_binary)
 
   return (dest_path, loader_path)
 
