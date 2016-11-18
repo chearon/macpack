@@ -9,14 +9,17 @@ import pathlib
 import re
 import shutil
 
+class PatchError(Exception):
+  pass
+
 class Dependency:
-  def __init__(self, filename):
-    self.path = pathlib.PurePath(os.path.realpath(filename))
+  def __init__(self, path):
+    self.path = pathlib.PosixPath(path).resolve()
     self.symlinks = []
     self.dependencies = []
 
-    if str(self.path) != filename:
-      self.symlinks.append(filename)
+    if self.path != path:
+      self.symlinks.append(str(path))
 
   def __repr__(self):
     return ('Dependency(\'' + str(self.path) + '\', '
@@ -53,9 +56,12 @@ class Dependency:
 
     (out, err) = await process.communicate()
 
-    self.dependencies = Dependency.deps_from_output(out.decode('utf-8'))
+    paths = Dependency.extract_paths_from_output(out.decode('utf-8'))
+    (deps, failed_paths) = Dependency.deps_from_paths(paths)
 
-    return self.dependencies
+    self.dependencies = deps
+
+    return (deps, failed_paths)
 
   def get_dependencies(self, is_sys = False):
     stack = [self]
@@ -74,15 +80,28 @@ class Dependency:
     return [d for d in self.dependencies if is_sys or not d.is_sys()]
 
   def extract_dep(line):
-    return Dependency(line[1:line.find(' (compatibility version ')])
+    return line[1:line.find(' (compatibility version ')]
 
   def is_dep_line(line):
     return len(line) > 0 and line[0] == '\t'
 
-  def deps_from_output(s):
+  def extract_paths_from_output(s):
     return [Dependency.extract_dep(l) for l in s.split('\n') if Dependency.is_dep_line(l)]
 
+  def deps_from_paths(paths):
+    dependencies = []
+    failed_paths = []
+
+    for path in paths:
+      try:
+        dependencies.append(Dependency(path))
+      except FileNotFoundError:
+        failed_paths.append(path)
+
+    return (dependencies, failed_paths)
+
 async def collect(root_dep):
+  failed_paths = []
   all_resolved = []
   stack = [[root_dep]]
 
@@ -92,8 +111,10 @@ async def collect(root_dep):
     all_resolved += resolving_deps
 
     to_resolve = []
-    for i, result in enumerate(results):
-      for j, dep in enumerate(result):
+    for i, deps_and_failed in enumerate(results):
+      failed_paths += deps_and_failed[1]
+
+      for j, dep in enumerate(deps_and_failed[0]):
         if not dep.is_sys():
           if dep in all_resolved:
             existing_dep = all_resolved[all_resolved.index(dep)]
@@ -108,57 +129,63 @@ async def collect(root_dep):
           else:
             to_resolve.append(dep)
 
-
     if len(to_resolve) > 0: stack.append(to_resolve)
 
-async def patch(root_dep):
-  process_coroutines = []
-  dest_path = pathlib.PurePath(root_dep.path.parent)
-  dest_loader_path = pathlib.PurePath('@loader_path')
+  if len(failed_paths):
+    print('Some of the paths in the dependency tree could not be resolved', file=sys.stderr)
+    print('Maybe you already bundled {}?'.format(root_dep.path.name), file=sys.stderr)
+    if (args.verbose):
+      for path in failed_paths:
+        print('Could not resolve {}'.format(path), file=sys.stderr)
+    else:
+      print('Run with -v to see failed paths', file=sys.stderr)
 
-  if not os.path.exists(str(dest_path)):
-    os.makedirs(str(dest_path))
+def ensure_dir(path):
+  if not os.path.exists(str(path)):
+    os.makedirs(str(path))
 
+async def patch(root_dep, dest_path, loader_path):
+  process_coros = []
   patch_deps = [root_dep] + root_dep.get_dependencies()
+
+  ensure_dir(dest_path)
 
   for dep in patch_deps:
     if dep == root_dep:
-      args = ['install_name_tool', str(root_dep.path)]
+      pargs = ['install_name_tool', str(root_dep.path)]
     else:
       shutil.copyfile(str(dep.path), str(dest_path / dep.path.name))
-      args = ['install_name_tool', str(dest_path / dep.path.name)]
+      pargs = ['install_name_tool', str(dest_path / dep.path.name)]
 
-    args += ['-id', str(dest_loader_path / dep.path.name)]
+    pargs += ['-id', str(loader_path / dep.path.name)]
 
     for dep_dep in dep.get_direct_dependencies():
-      args += ['-change', str(dep_dep.path), str(dest_loader_path / dep_dep.path.name)]
+      pargs += ['-change', str(dep_dep.path), str(loader_path / dep_dep.path.name)]
       for symlink in dep_dep.symlinks:
-        args += ['-change', symlink, str(dest_loader_path / dep_dep.path.name)]
+        pargs += ['-change', symlink, str(loader_path / dep_dep.path.name)]
 
-    process_coroutines.append(asyncio.create_subprocess_exec(*args, 
+    process_coros.append(asyncio.create_subprocess_exec(*pargs,
       stdout = subprocess.PIPE,
       stderr = subprocess.PIPE
     ))
 
-  processes = await asyncio.gather(*process_coroutines)
+  processes = await asyncio.gather(*process_coros)
   results = await asyncio.gather(*[p.communicate() for p in processes])
 
   did_error = False
   for process, (out, err), dep in zip(processes, results, patch_deps):
     if process.returncode:
       did_error = True
-      print('Error patching {}'.format(dep.filename), file=sys.stderr)
+      print('Error patching {}'.format(str(dep.path.name)), file=sys.stderr)
       if args.verbose:
         print(err.decode('utf-8'))
 
-  if did_error: raise Exception('One or more dependencies could not be patched')
-
-  # TODO test for success
+  if did_error: raise PatchError('One or more dependencies could not be patched')
 
 def print_deps_minimal(d):
   deps = d.get_dependencies()
 
-  print(str(len(deps)) + ' total non-system dependencies')
+  print(str(len(deps)) + ' total non-system dependenc{}'.format('y' if len(deps) == 1 else 'ies'))
 
   for i, dep in enumerate(deps):
     dep_slots = [str(deps.index(d) + 1) for d in dep.get_direct_dependencies()]
@@ -168,37 +195,63 @@ def print_deps_minimal(d):
 def print_deps(d):
   deps = d.get_dependencies()
 
-  print(str(len(deps)) + ' total non-system dependencies')
+  print(str(len(deps)) + ' total non-system dependenc{}'.format('y' if len(deps) == 1 else 'ies'))
 
   for dep in deps:
     print(dep.path.name)
     for dep_dep in dep.get_dependencies():
       print('-> ' + dep_dep.path.name)
 
-def main():
-  print("Patching {}".format(args.file))
-  d = Dependency(args.file)
-  loop = asyncio.get_event_loop()
-
-  loop.run_until_complete(collect(d))
+def prepatch_output(d):
+  print("Patching {}".format(str(args.file)))
 
   if args.verbose:
     print_deps(d)
   else:
     print_deps_minimal(d)
 
+def get_dest_and_loader_path(root_dep_path, dest_path):
+  if dest_path.is_absolute():
+    loader_path = dest_path
+  else:
+    dest_path = root_dep_path.parent / dest_path
+    rel_to_binary = os.path.relpath(str(dest_path), str(root_dep_path))
+    loader_path = pathlib.PurePath('@executable_path', rel_to_binary)
+
+  return (dest_path, loader_path)
+
+def main(args):
   try:
-    loop.run_until_complete(patch(d))
-  except Exception:
+    d = Dependency(args.file)
+  except FileNotFoundError:
+    print('{} does not exist!'.format(str(args.file)), file=sys.stderr)
     sys.exit(1)
+
+  loop = asyncio.get_event_loop()
+
+  loop.run_until_complete(collect(d))
+
+  dest_path, loader_path = get_dest_and_loader_path(d.path, args.destination)
+
+  prepatch_output(d)
+
+  try:
+    loop.run_until_complete(patch(d, dest_path, loader_path))
+  except PatchError: # the error should have been already printed here
+    if not args.verbose: print('Run with -v for more information', file=sys.stderr)
+    sys.exit(1)
+
+  n_deps = len(d.get_dependencies())
+  print()
+  print('{} + {} dependenc{} successfully patched'.format(args.file.name, n_deps, 'y' if n_deps == 1 else 'ies'))
 
   loop.close()
 
-parser = argparse.ArgumentParser(description='Copies non-system libraries used by your executable and patches them to work as a standalone bundle')
-parser.add_argument('--verbose', help='displays more library information and output of install_name_tool', action='store_true')
-parser.add_argument('file', help='file to patch (the root, main binary)')
-args = parser.parse_args()
-
 if __name__ == '__main__':
-  main()
+  parser = argparse.ArgumentParser(description='Copies non-system libraries used by your executable and patches them to work as a standalone bundle')
+  parser.add_argument('file', help='file to patch (the root, main binary)', type=pathlib.PurePath)
+  parser.add_argument('-v', '--verbose', help='displays more library information and output of install_name_tool', action='store_true')
+  parser.add_argument('-d', '--destination', help='destination directory where the binaries will be placed and loaded', type=pathlib.Path, default='../libs')
+  args = parser.parse_args()
+  main(args)
 
