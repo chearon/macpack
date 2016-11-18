@@ -1,3 +1,14 @@
+# Overview
+
+Bundles up all dependencies used by an executable (or library) into a single
+folder, and patches all of the executables to look in that directory so you
+don't have to rely on your users having certain libraries installed.
+
+Part of my motivation in making this was to learn Python 3's
+[async/await](https://docs.python.org/3/library/asyncio-task.html), too. The
+processes that are used to patch stuff and query dependencies all run in
+parallel so it should be super fast!
+
 # Usage and requirements
 
 You need:
