@@ -144,7 +144,7 @@ def ensure_dir(path):
   if not os.path.exists(str(path)):
     os.makedirs(str(path))
 
-async def patch(root_dep, dest_path, loader_path):
+async def patch(root_dep, dest_path, root_loader_path):
   process_coros = []
   patch_deps = [root_dep] + root_dep.get_dependencies()
 
@@ -153,9 +153,11 @@ async def patch(root_dep, dest_path, loader_path):
   for dep in patch_deps:
     if dep == root_dep:
       pargs = ['install_name_tool', str(root_dep.path)]
+      loader_path = root_loader_path
     else:
       shutil.copyfile(str(dep.path), str(dest_path / dep.path.name))
       pargs = ['install_name_tool', str(dest_path / dep.path.name)]
+      loader_path = pathlib.PurePath('@loader_path')
 
     pargs += ['-id', str(loader_path / dep.path.name)]
 
@@ -231,12 +233,12 @@ def main(args):
 
   loop.run_until_complete(collect(d))
 
-  dest_path, loader_path = get_dest_and_loader_path(d.path, args.destination)
+  dest_path, root_loader_path = get_dest_and_loader_path(d.path, args.destination)
 
   prepatch_output(d)
 
   try:
-    loop.run_until_complete(patch(d, dest_path, loader_path))
+    loop.run_until_complete(patch(d, dest_path, root_loader_path))
   except PatchError: # the error should have been already printed here
     if not args.verbose: print('Run with -v for more information', file=sys.stderr)
     sys.exit(1)
