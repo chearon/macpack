@@ -77,6 +77,11 @@ If you want the executable and libraries to have absolute paths instead of loadi
 relative to the binary, you just need to specify an absolutep path for `-d`. In
 that case the `@executable_path` will not be put into the binaries at all.
 
+## -n, --dry-run
+
+Just prints the dependency tree and doesn't do any patching. Use `-nv` to get a
+slightly more user-friendly tree printed out.
+
 # Background
 It will parse out the executable's dependencies (using `otool -L`) and their
 dependencies recursively, filtering out system libraries. When the tree
