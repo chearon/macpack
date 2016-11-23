@@ -237,15 +237,16 @@ def main(args):
 
   prepatch_output(d)
 
-  try:
-    loop.run_until_complete(patch(d, dest_path, root_loader_path))
-  except PatchError: # the error should have been already printed here
-    if not args.verbose: print('Run with -v for more information', file=sys.stderr)
-    sys.exit(1)
+  if not args.dry_run:
+    try:
+      loop.run_until_complete(patch(d, dest_path, root_loader_path))
+    except PatchError: # the error should have been already printed here
+      if not args.verbose: print('Run with -v for more information', file=sys.stderr)
+      sys.exit(1)
 
-  n_deps = len(d.get_dependencies())
-  print()
-  print('{} + {} dependenc{} successfully patched'.format(args.file.name, n_deps, 'y' if n_deps == 1 else 'ies'))
+    n_deps = len(d.get_dependencies())
+    print()
+    print('{} + {} dependenc{} successfully patched'.format(args.file.name, n_deps, 'y' if n_deps == 1 else 'ies'))
 
   loop.close()
 
@@ -253,6 +254,7 @@ if __name__ == '__main__':
   parser = argparse.ArgumentParser(description='Copies non-system libraries used by your executable and patches them to work as a standalone bundle')
   parser.add_argument('file', help='file to patch (the root, main binary)', type=pathlib.PurePath)
   parser.add_argument('-v', '--verbose', help='displays more library information and output of install_name_tool', action='store_true')
+  parser.add_argument('-n', '--dry-run', help='just show the dependency tree but do not do any patching', action='store_true')
   parser.add_argument('-d', '--destination', help='destination directory where the binaries will be placed and loaded', type=pathlib.Path, default='../libs')
   args = parser.parse_args()
   main(args)
