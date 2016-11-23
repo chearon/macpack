@@ -3,7 +3,7 @@ import setuptools
 try:
   import pypandoc
   description = pypandoc.convert('README.md', 'rst')
-except ImportError:
+except (IOError, ImportError):
   description = ''
 
 setuptools.setup(
