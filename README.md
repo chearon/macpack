@@ -16,16 +16,23 @@ You need:
 * Python 3 (`brew install python3`) because it uses async/await and asyncio
 * Xcode CLI tools (I think)
 
-Then do:
+The easiest way to get going is by installing through pip + PyPi:
 
 ```
-./macpack.py <your executable here>
+pip3 install macpack
+macpack <your executable here>
+```
+
+You can also run it out of the project directory by doing:
+
+```
+macpack/patcher.py <your executable here>
 ```
 
 It should print the dependency tree like this example:
 
 ```
-2$ ./macpack.py ~/Code/node-canvas/build/Release/canvas.node
+$ macpack ~/Code/node-canvas/build/Release/canvas.node
 Patching /Users/caleb/Code/node-canvas/build/Release/canvas.node
 16 total non-system dependencies
 1       libpixman-1.0.dylib -> 1
