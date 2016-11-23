@@ -3,4 +3,5 @@ __pycache__
 dist/
 build/
 macpack.egg-info/
+MANIFEST
 
