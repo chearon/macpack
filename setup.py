@@ -1,9 +1,10 @@
 import setuptools
+import os
 
 try:
   import pypandoc
-  description = pypandoc.convert('README.md', 'rst')
-except (IOError, ImportError):
+  description = pypandoc.convert('README.md', 'rst') if os.path.exists('README.md') else ''
+except ImportError:
   description = ''
 
 setuptools.setup(
