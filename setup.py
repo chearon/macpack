@@ -1,7 +1,10 @@
 import setuptools
-import pypandoc
 
-description = pypandoc.convert('README.md', 'rst')
+try:
+  import pypandoc
+  description = pypandoc.convert('README.md', 'rst')
+except ImportError:
+  description = ''
 
 setuptools.setup(
   name = 'macpack',
