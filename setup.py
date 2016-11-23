@@ -10,7 +10,7 @@ except ImportError:
 setuptools.setup(
   name = 'macpack',
   packages = setuptools.find_packages(),
-  version = '1.0.1',
+  version = '1.0.2',
   description = 'Makes a macOS binary redistributable by searching the dependency tree and copying/patching non-system libraries.',
   long_description = description,
   author = 'Caleb Hearon',
