@@ -6,7 +6,7 @@ import subprocess
 
 class Dependency:
   def __init__(self, path):
-    self.path = pathlib.PosixPath(path).resolve()
+    self.path = pathlib.PosixPath(path).resolve(strict=True)
     self.symlinks = []
     self.dependencies = []
 
