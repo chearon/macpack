@@ -3,12 +3,16 @@ import asyncio
 import re
 import pathlib
 import subprocess
+import re
+import os
+import sys
 
 class Dependency:
   def __init__(self, path):
     self.path = pathlib.PosixPath(path).resolve(strict=True)
     self.symlinks = []
     self.dependencies = []
+    self.rpaths = []
 
     if self.path != path:
       self.symlinks.append(str(path))
@@ -42,13 +46,16 @@ class Dependency:
       self.dependencies.append(d)
 
   async def find_dependencies(self):
+    # find all rpaths associated with this item
+    self.rpaths = await self.find_rpaths()
+
     process = await asyncio.create_subprocess_exec('otool', '-L', str(self.path),
       stdout = subprocess.PIPE,
       stderr = subprocess.PIPE)
 
     (out, err) = await process.communicate()
 
-    paths = Dependency.extract_paths_from_output(out.decode('utf-8'))
+    paths = self.extract_paths_from_output(out.decode('utf-8'))
     (deps, failed_paths) = Dependency.deps_from_paths(paths)
 
     self.dependencies = deps
@@ -71,23 +78,57 @@ class Dependency:
   def get_direct_dependencies(self, is_sys = False):
     return [d for d in self.dependencies if is_sys or not d.is_sys()]
 
-  def extract_dep(line):
-    return line[1:line.find(' (compatibility version ')]
+
+  async def find_rpaths(self):
+    process = await asyncio.create_subprocess_exec('otool', '-l', str(self.path),
+                                                   stdout=subprocess.PIPE,
+                                                   stderr=subprocess.PIPE)
+    out, err = await process.communicate()
+    out = out.decode('utf-8')
+    return re.findall('LC_RPATH\n.*\n.*path ([a-zA-Z0-9/ ]+) \(', out, re.MULTILINE)
+
+  def find_in_rpath(self, library_name):
+    for rpath in self.rpaths:
+      if os.path.exists(rpath + library_name):
+        return rpath + library_name
+
+    return None
+
+  def extract_dep(self, line):
+    path = line[1:line.find(' (compatibility version ')]
+
+    # if path is relative to loader, we substitute it with the path of the requester
+    if path.startswith('@loader_path'):
+      path = path.replace('@loader_path', str(self.path.parent))
+
+    if path.startswith('@rpath'):
+      path = self.find_in_rpath(path.replace('@rpath', ''))
+
+    if path is None:
+      print('Could not resolve %s in rpath' % line, file=sys.stderr)
+
+    return path
+
 
   def is_dep_line(line):
     return len(line) > 0 and line[0] == '\t'
 
-  def extract_paths_from_output(s):
-    return [Dependency.extract_dep(l) for l in s.split('\n') if Dependency.is_dep_line(l)]
+  def extract_paths_from_output(self, s):
+    return [self.extract_dep(l) for l in s.split('\n') if Dependency.is_dep_line(l)]
 
   def deps_from_paths(paths):
     dependencies = []
     failed_paths = []
 
     for path in paths:
+      if path is None:
+        continue
+
       try:
         dependencies.append(Dependency(path))
       except FileNotFoundError:
         failed_paths.append(path)
 
     return (dependencies, failed_paths)
+
+
