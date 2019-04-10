@@ -7,19 +7,17 @@ import re
 import os
 import sys
 
+
 class Dependency:
-  def __init__(self, path):
-    self.path = pathlib.PosixPath(path).resolve(strict=True)
-    self.symlinks = []
+  def __init__(self, reference, file_path):
+    self.path = file_path
+    self.referred_as = {reference}
     self.dependencies = []
     self.rpaths = []
 
-    if self.path != path:
-      self.symlinks.append(str(path))
-
   def __repr__(self):
     return ('Dependency(\'' + str(self.path) + '\', '
-            'symlinks=' + str(len(self.symlinks)) + '\', '
+            'referred_as=' + str(len(self.referred_as)) + '\', '
             'dependencies=' + str(len(self.dependencies)) + ')')
 
   def __eq__(self, b):
@@ -34,13 +32,9 @@ class Dependency:
 
     return is_sys
 
-  def add_symlink(self, path):
-    if path not in self.symlinks:
-      self.symlinks.append(path)
-
   def merge(self, dependency):
-    for s in dependency.symlinks:
-      self.add_symlink(s)
+    for reference in dependency.referred_as:
+      self.referred_as.add(reference)
 
     for d in dependency.dependencies:
       self.dependencies.append(d)
@@ -55,12 +49,12 @@ class Dependency:
 
     (out, err) = await process.communicate()
 
-    paths = self.extract_paths_from_output(out.decode('utf-8'))
-    (deps, failed_paths) = Dependency.deps_from_paths(paths)
+    references = self.extract_references_from_output(out.decode('utf-8'))
+    (deps, failed_references) = self.deps_from_references(references)
 
     self.dependencies = deps
 
-    return (deps, failed_paths)
+    return (deps, failed_references)
 
   def get_dependencies(self, is_sys = False):
     stack = [self]
@@ -87,48 +81,53 @@ class Dependency:
     out = out.decode('utf-8')
     return re.findall('LC_RPATH\n.*\n.*path ([a-zA-Z0-9/ ]+) \(', out, re.MULTILINE)
 
-  def find_in_rpath(self, library_name):
+  def resolve_in_rpath(self, library_name):
     for rpath in self.rpaths:
       if os.path.exists(rpath + library_name):
-        return rpath + library_name
-
+        return os.path.realpath(rpath + library_name)
     return None
 
-  def extract_dep(self, line):
+  def extract_referral(self, line):
     path = line[1:line.find(' (compatibility version ')]
-
-    # if path is relative to loader, we substitute it with the path of the requester
-    if path.startswith('@loader_path'):
-      path = path.replace('@loader_path', str(self.path.parent))
-
-    if path.startswith('@rpath'):
-      path = self.find_in_rpath(path.replace('@rpath', ''))
-
-    if path is None:
-      print('Could not resolve %s in rpath' % line, file=sys.stderr)
-
     return path
 
 
   def is_dep_line(line):
     return len(line) > 0 and line[0] == '\t'
 
-  def extract_paths_from_output(self, s):
-    return [self.extract_dep(l) for l in s.split('\n') if Dependency.is_dep_line(l)]
+  def extract_references_from_output(self, s):
+    return [self.extract_referral(l) for l in s.split('\n') if Dependency.is_dep_line(l)]
 
-  def deps_from_paths(paths):
+
+  def file_path_from_reference(self, reference):
+    # if path is relative to loader, we substitute it with the path of the requester
+    result = reference
+    if reference.startswith('@loader_path'):
+      result = reference.replace('@loader_path', str(self.path.parent))
+
+    if reference.startswith('@rpath'):
+      result = self.resolve_in_rpath(reference.replace('@rpath', ''))
+
+    if result is None:
+      print('Could not resolve %s in rpath' % reference, file=sys.stderr)
+    else:
+      result = pathlib.PosixPath(result).resolve(strict=True)
+
+    return result
+
+
+  def deps_from_references(self, references):
     dependencies = []
-    failed_paths = []
+    failed_references = []
 
-    for path in paths:
-      if path is None:
+    for reference in references:
+      if reference is None:
         continue
 
       try:
-        dependencies.append(Dependency(path))
+        dependencies.append(Dependency(reference, self.file_path_from_reference(reference)))
       except FileNotFoundError:
-        failed_paths.append(path)
+        failed_references.append(reference)
 
-    return (dependencies, failed_paths)
-
+    return dependencies, failed_references
 

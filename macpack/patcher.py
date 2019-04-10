@@ -75,14 +75,13 @@ async def patch(root_dep, dest_path, root_loader_path):
     pargs += ['-id', str(loader_path / dep.path.name)]
 
     for dep_dep in dep.get_direct_dependencies():
-      pargs += ['-change', str(dep_dep.path), str(loader_path / dep_dep.path.name)]
-      for symlink in dep_dep.symlinks:
-        pargs += ['-change', symlink, str(loader_path / dep_dep.path.name)]
+      for referral in dep_dep.referred_as:
+        pargs += ['-change', referral, str(loader_path / dep_dep.path.name)]
 
     process_coros.append(asyncio.create_subprocess_exec(*pargs,
-      stdout = subprocess.PIPE,
-      stderr = subprocess.PIPE
-    ))
+                                                        stdout = subprocess.PIPE,
+                                                        stderr = subprocess.PIPE
+                                                        ))
 
   processes = await asyncio.gather(*process_coros)
   results = await asyncio.gather(*[p.communicate() for p in processes])
@@ -137,7 +136,7 @@ def get_dest_and_loader_path(root_dep_path, dest_path):
 
 def main():
   try:
-    d = dependency.Dependency(args.file)
+    d = dependency.Dependency(args.file, pathlib.PosixPath(args.file).resolve(strict=True))
   except FileNotFoundError:
     print('{} does not exist!'.format(str(args.file)), file=sys.stderr)
     sys.exit(1)
