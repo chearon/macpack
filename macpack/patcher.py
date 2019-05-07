@@ -71,26 +71,28 @@ def ensure_dir(path):
         os.makedirs(str(path))
 
 
-async def patch(root_dep, dest_path, root_loader_path):
+async def patch(root_item, dest_path, root_loader_path):
     process_coros = []
-    patch_deps = [root_dep] + root_dep.get_dependencies()
+    items = [root_item] + root_item.get_dependencies()
 
     ensure_dir(dest_path)
 
-    for dep in patch_deps:
-        if dep == root_dep:
-            pargs = ['install_name_tool', str(root_dep.path)]
-            loader_path = root_loader_path
+    for item in items:
+        loader_path = pathlib.PurePath('@loader_path')
+
+        if item == root_item:
+            pargs = ['install_name_tool', str(root_item.path)]
         else:
-            shutil.copyfile(str(dep.path), str(dest_path / dep.path.name))
-            pargs = ['install_name_tool', str(dest_path / dep.path.name)]
-            loader_path = pathlib.PurePath('@loader_path')
+            shutil.copyfile(str(item.path), str(dest_path / item.path.name))
+            pargs = ['install_name_tool', str(dest_path / item.path.name)]
 
-        pargs += ['-id', str(loader_path / dep.path.name)]
+        pargs += ['-id', str(loader_path / item.path.name)]
 
-        for dep_dep in dep.get_direct_dependencies():
-            for referral in dep_dep.referred_as:
-                pargs += ['-change', referral, str(loader_path / dep_dep.path.name)]
+        for dep in item.get_direct_dependencies():
+            for reference in dep.referred_as:
+                new_path = loader_path if item != root_item else root_loader_path
+                new_path = new_path if dep != root_item else loader_path
+                pargs += ['-change', reference, str(new_path / dep.path.name)]
 
         process_coros.append(asyncio.create_subprocess_exec(*pargs,
                                                             stdout=subprocess.PIPE,
@@ -101,7 +103,7 @@ async def patch(root_dep, dest_path, root_loader_path):
     results = await asyncio.gather(*[p.communicate() for p in processes])
 
     did_error = False
-    for process, (out, err), dep in zip(processes, results, patch_deps):
+    for process, (out, err), dep in zip(processes, results, items):
         if process.returncode:
             did_error = True
             print('Error patching {}'.format(str(dep.path.name)), file=sys.stderr)
