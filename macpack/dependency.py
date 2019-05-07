@@ -77,7 +77,10 @@ class Dependency:
                                                        stderr=subprocess.PIPE)
         out, err = await process.communicate()
         out = out.decode('utf-8')
-        return re.findall('LC_RPATH\n.*\n.*path ([a-zA-Z0-9_/ .-]+) \(', out, re.MULTILINE)
+        rpaths = re.findall('LC_RPATH\n.*\n.*path ([a-zA-Z0-9_/ .-]+) \(', out, re.MULTILINE)
+        # always add current path to be a valid rpath
+        rpaths.append(str(self.path.parent))
+        return rpaths
 
     def resolve_in_rpath(self, library_name):
         for rpath in self.rpaths:
