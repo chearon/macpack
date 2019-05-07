@@ -11,7 +11,7 @@ import sys
 class Dependency:
     def __init__(self, reference, file_path):
         self.path = file_path
-        self.referred_as = {reference}
+        self.referred_as = {str(reference)}
         self.dependencies = []
         self.rpaths = []
 
