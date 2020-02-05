@@ -5,3 +5,4 @@ build/
 macpack.egg-info/
 MANIFEST
 
+.idea
