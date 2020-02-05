@@ -72,10 +72,11 @@ def ensure_dir(path):
 
 
 async def patch(root_item, dest_path, root_loader_path):
-    process_coros = []
     items = [root_item] + root_item.get_dependencies()
 
     ensure_dir(dest_path)
+
+    process_results = []
 
     for item in items:
         loader_path = pathlib.PurePath('@loader_path')
@@ -94,17 +95,16 @@ async def patch(root_item, dest_path, root_loader_path):
                 new_path = new_path if dep != root_item else loader_path
                 pargs += ['-change', reference, str(new_path / dep.path.name)]
 
-        process_coros.append(asyncio.create_subprocess_exec(*pargs,
+        process = await asyncio.create_subprocess_exec(*pargs,
                                                             stdout=subprocess.PIPE,
                                                             stderr=subprocess.PIPE
-                                                            ))
-
-    processes = await asyncio.gather(*process_coros)
-    results = await asyncio.gather(*[p.communicate() for p in processes])
+                                                            )
+        out, err = await process.communicate()
+        process_results.append((process.returncode, out, err))
 
     did_error = False
-    for process, (out, err), dep in zip(processes, results, items):
-        if process.returncode:
+    for (returncode, out, err), dep in zip(process_results, items):
+        if returncode:
             did_error = True
             print('Error patching {}'.format(str(dep.path.name)), file=sys.stderr)
             if args.verbose:
