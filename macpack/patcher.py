@@ -10,6 +10,12 @@ import shutil
 
 from macpack import dependency
 
+# https://stackoverflow.com/a/79796025
+try:
+    asyncio.get_event_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 class PatchError(Exception):
   pass
 
